@@ -1,7 +1,8 @@
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.Scanner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -10,39 +11,34 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Server {
 
     private static final int PORT = 8080;
-    private static final int MAX_THREADS = 100;
-    
-    // Thread pool of 100
+    private static final int MAX_THREADS = 200;
+    // Initializing thread pool of 200
     private static final ExecutorService pool = Executors.newFixedThreadPool(MAX_THREADS);
-    
     // Store active connections
     public static final ConcurrentHashMap<Integer, ClientHandler> clients = new ConcurrentHashMap<>();
-    private static final AtomicInteger clientIdCounter = new AtomicInteger(1);
-    
+    private static final AtomicInteger clientIdCounter = new AtomicInteger(1); //Atomic integer for safe concurrency
     private static ServerSocket serverSocket;
     private static volatile boolean running = true;
+    private static Thread adminThread;
 
     public static void main(String[] args) {
         
-        System.out.println("Starting C2 Server...");
+        System.out.println("Starting Server...");
         try {
             serverSocket = new ServerSocket(PORT);
             System.out.println("Server listening on port " + PORT);
             
-            // Start Admin CLI Thread
-            Thread cliThread = new Thread(Server::runAdminCLI);
-            cliThread.setDaemon(true);
-            cliThread.start();
+            // Admin thread handles CLI commands
+            adminThread = new Thread(Server::runAdminCLI);
+            adminThread.start();
             
             // Accept connections loop
             while (running) {
                 try {
                     Socket clientSocket = serverSocket.accept();
                     int clientId = clientIdCounter.getAndIncrement();
-                    
                     ClientHandler handler = new ClientHandler(clientId, clientSocket);
                     clients.put(clientId, handler);
-                    
                     pool.execute(handler);
                 } catch (IOException e) {
                     if (running) {
@@ -55,20 +51,38 @@ public class Server {
             System.err.println("Could not listen on port " + PORT);
         } finally {
             shutdown();
+            try {
+                if (adminThread != null) adminThread.join();
+            } catch (InterruptedException ignored) {}
         }
     }
     
     private static void runAdminCLI() {
-        Scanner scanner = new Scanner(System.in);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        System.out.print("C2> ");
         while (running) {
-            // Slight delay so the prompt isn't interleaved randomly
-            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
-            
+            try {
+                if (reader.ready()) {
+                    String input = reader.readLine();
+                    if (input != null) {
+                        input = input.trim();
+                        if (!input.isEmpty()) {
+                            processCommand(input);
+                        }
+                    }
+                    if (running) {
             System.out.print("C2> ");
-            if (!scanner.hasNextLine()) break;
-            String input = scanner.nextLine().trim();
-            if (input.isEmpty()) continue;
-            
+                    }
+                } else {
+                    Thread.sleep(50);
+                }
+            } catch (IOException | InterruptedException e) {
+                if (!running) break;
+            }
+        }
+    }
+    
+    private static void processCommand(String input) {
             String[] parts = input.split(" ", 3);
             String command = parts[0].toLowerCase();
             
@@ -132,15 +146,14 @@ public class Server {
                     break;
                     
                 case "exit":
+                System.out.println("Initiating shutdown...");
                     running = false;
                     shutdown();
-                    return;
+                break;
                     
                 default:
                     System.out.println("[ERROR] Unknown command. Available: status | kill <id|all> | echo <id|all> <msg> | exit");
             }
-        }
-        scanner.close();
     }
     
     public static void removeClient(int clientId) {
@@ -148,16 +161,18 @@ public class Server {
     }
     
     private static void shutdown() {
-        System.out.println("Shutting down server...");
         running = false;
         try {
-            if (serverSocket != null) serverSocket.close();
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
             for (ClientHandler handler : clients.values()) {
                 handler.disconnect();
             }
-            pool.shutdown();
-        } catch (IOException e) {
-            e.printStackTrace();
+            pool.shutdownNow(); // Using shutdownNow to interrupt any blocking threads
+        } 
+        catch (IOException e) {
+            System.err.println("Error during shutdown: " + e.getMessage());
         }
         System.out.println("Server shutdown complete.");
         System.exit(0);
