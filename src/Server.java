@@ -12,7 +12,6 @@ public class Server {
 
     private static final int PORT = 8080;
     private static final int MAX_THREADS = 40;
-    // Initializing thread pool of 200
     private static final ExecutorService pool = Executors.newFixedThreadPool(MAX_THREADS);
     // Store active connections
     public static final ConcurrentHashMap<Integer, ClientHandler> clients = new ConcurrentHashMap<>();
@@ -40,6 +39,8 @@ public class Server {
                     ClientHandler handler = new ClientHandler(clientId, clientSocket);
                     clients.put(clientId, handler);
                     pool.execute(handler);
+                    System.out.println("\n[INFO] Client " + clientId + " connected.");
+                    System.out.print("C2> ");
                 } catch (IOException e) {
                     if (running) {
                         System.err.println("Error accepting connection: " + e.getMessage());

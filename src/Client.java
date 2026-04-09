@@ -21,8 +21,11 @@ public class Client {
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             
-            String serverMsg;
-            while ((serverMsg = in.readLine()) != null) {
+            String rawMsg;
+            while ((rawMsg = in.readLine()) != null) {
+                String serverMsg = CryptoUtils.decrypt(rawMsg);
+                if (serverMsg == null) continue;
+                
                 if (serverMsg.startsWith("ID ")) {
                     myId = Integer.parseInt(serverMsg.substring(3).trim());
                     System.out.println("[Client " + myId + "] Connected to server.");
