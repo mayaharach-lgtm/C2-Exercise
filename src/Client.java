@@ -8,7 +8,6 @@ public class Client {
 
     private static final String HOST = "127.0.0.1";
     private static final int PORT = 8080;
-    
     private Socket socket;
     private PrintWriter out;
     private BufferedReader in;
@@ -26,7 +25,7 @@ public class Client {
             while ((serverMsg = in.readLine()) != null) {
                 if (serverMsg.startsWith("ID ")) {
                     myId = Integer.parseInt(serverMsg.substring(3).trim());
-                    // System.out.println("[Client " + myId + "] Connected to server.");
+                    System.out.println("[Client " + myId + "] Connected to server.");
                 } 
                 else if (serverMsg.startsWith("ECHO ")) {
                     String msg = serverMsg.substring(5);
@@ -38,9 +37,11 @@ public class Client {
                 }
             }
             
-        } catch (IOException e) {
-            // System.err.println("Connection error: " + e.getMessage());
-        } finally {
+        } 
+        catch (IOException e) {
+            System.err.println("Connection error: " + e.getMessage());
+        } 
+        finally {
             closeApp();
         }
     }
@@ -50,8 +51,9 @@ public class Client {
             if (out != null) out.close();
             if (in != null) in.close();
             if (socket != null && !socket.isClosed()) socket.close();
-        } catch (IOException e) {
-            // ignore
+        } 
+        catch (IOException e) {
+            throw new RuntimeException("Failed to close client streams", e);
         }
     }
 

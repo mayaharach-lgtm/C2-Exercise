@@ -24,20 +24,19 @@ public class ClientHandler implements Runnable {
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             
-            // Greet client
-            out.println("ID " + clientId);
+            sendMessage("ID " + clientId);
             
-            // Listen for client responses if needed (not heavily used in phase 1)
             String inputLine;
             while (running && (inputLine = in.readLine()) != null) {
-                // If we get an explicit close
-                if (inputLine.equals("QUIT")) {
+                String decrypted = CryptoUtils.decrypt(inputLine);
+                if (decrypted == null) continue;
+                if (decrypted.equals("QUIT")) {
                     break;
                 }
             }
             
         } catch (IOException e) {
-            // Usually triggered when socket closes unexpectedly, ignored for simplicity.
+            throw new RuntimeException("Failed to close client streams", e);
         } finally {
             cleanup();
         }
@@ -45,7 +44,10 @@ public class ClientHandler implements Runnable {
     
     public void sendMessage(String msg) {
         if (out != null && running) {
-            out.println(msg);
+            String encryptedMsg = CryptoUtils.encrypt(msg);
+            if (encryptedMsg != null) {
+                out.println(encryptedMsg);
+            }
         }
     }
     
@@ -61,8 +63,9 @@ public class ClientHandler implements Runnable {
             if (out != null) out.close();
             if (in != null) in.close();
             if (socket != null && !socket.isClosed()) socket.close();
-        } catch (IOException e) {
-            // Ignored
+        } 
+        catch (IOException e) {
+            throw new RuntimeException("Failed to close client streams", e);
         }
     }
 }

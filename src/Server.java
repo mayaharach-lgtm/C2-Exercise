@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Server {
 
     private static final int PORT = 8080;
-    private static final int MAX_THREADS = 200;
+    private static final int MAX_THREADS = 40;
     // Initializing thread pool of 200
     private static final ExecutorService pool = Executors.newFixedThreadPool(MAX_THREADS);
     // Store active connections
