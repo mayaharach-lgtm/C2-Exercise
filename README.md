@@ -1,17 +1,19 @@
 # C2 Project Infrastructure
-
-A stable, purely Java-based Command and Control (C2) framework built on raw Sockets and ThreadPools.
-Supports concurrent encrypted remote connections natively scalable up to user limits.
+A stable, Java-based Command and Control (C2) framework built on raw Sockets and Maven.
+Supports concurrent encrypted connections, SQL logging, and is natively scalable.
 
 ## Directory Structure
 
 C2Exercise/
 │
-├─ src/
-│   ├─ CryptoUtils.java
+├─ src/main/java/
 │   ├─ Client.java
 │   ├─ ClientHandler.java
+│   ├─ CryptoUtils.java
+│   ├─ DatabaseManage.java
 │   └─ Server.java 
+├─ pom.xml
+└─ c2_project.db (Generated after first run)
 
 
 ### Features
@@ -24,18 +26,21 @@ C2Exercise/
   - `echo <clientId|all> <msg>`: Pushes an instantly encrypted secure payload payload across the network to specified clients.
   - `exit`: Securely signals global shutdown sequence preventing memory leaks. 
 
-## Initialization & Setup
+#### Prerequisites
+Java 17 or higher.
+Apache Maven installed.
+
+##### Initialization & Setup
 
 Clone this repository and compile the source Java files into the binaries output directory manually.
 
-```bash
 # 1. Clone the repository
 git clone https://github.com/mayaharach-lgtm/C2-Exercise.git
 cd "C2-Exercise"
 
-# 2. Compile Java sources into the binary directory
-javac -d bin src/*.java
-```
+# 2. Compile and download dependencies (SQLite JDBC)
+mvn clean compile
+
 
 ### Running the Project
 
@@ -44,16 +49,16 @@ Run these commands entirely in detached terminal instances. Do not run the Clien
 #### Booting the Server
 ```bash
 # 1. Start the C2 Admin instance. It will open `C2>` prompt for interactions
-java -cp bin Server
+mvn exec:java "-Dexec.mainClass=Server"
 ```
 
 #### Launching Clients
 ```bash
 # 2. Boot a generic client listener process
-java -cp bin Client
+mvn exec:java "-Dexec.mainClass=Client"
 
 # 3. Run commmands 
 - `status`: Views the number of current active connections.
 - `kill <clientId|all>`: Gracefully disconnects a specific client remotely by ID or sends a termination order to everybody.
-- `echo <clientId|all> <msg>`: Pushes an instantly encrypted secure payload payload across the network to specified      clients.
+-  'run <clientId|all> <command>': Runs bash command on a specific client remotely by ID or sends a  command to everybody.
 - `exit`: Securely signals global shutdown sequence preventing memory leaks. 

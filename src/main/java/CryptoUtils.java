@@ -1,5 +1,20 @@
 import java.util.Base64;
 
+/**
+ * Utility class for symmetric encryption and decryption using a repeating XOR cipher.
+ *
+ * This class provides thread-safe encryption and decryption methods that:
+ * - Use a hardcoded multi-byte key ("SuperSecretXorKey") for XOR operations
+ * - Convert plain text to bytes using UTF-8 encoding
+ * - Apply the XOR operation byte-by-byte with the repeating key
+ * - Encode encrypted bytes to Base64 strings for safe transmission
+ * - Decode Base64 strings back to bytes before decryption
+ * - Handle null or empty input gracefully
+ * - Log encryption/decryption errors to the console
+ *
+ * All methods are static and can be used directly without instantiation.
+ */
+
 public class CryptoUtils {
 
     // Repeating multi-byte key
